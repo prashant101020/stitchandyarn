@@ -4,7 +4,7 @@ import type { Category, Product, Testimonial, SiteSettings } from './types';
 export const siteSettings: SiteSettings = {
   free_shipping_threshold: 599,
   shipping_cost: 79,
-  whatsapp_number: '919876543210',
+  whatsapp_number: '918779355911',
   instagram_url: 'https://instagram.com/stitchandyarn.deepa',
   email: 'hello@stitchandyarn.in',
   razorpay_enabled: false,

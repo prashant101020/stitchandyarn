@@ -74,7 +74,7 @@ Edit `.env` with your Supabase credentials:
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 VITE_RAZORPAY_KEY_ID=        # Leave empty for WhatsApp-only mode
-VITE_WHATSAPP_NUMBER=919876543210
+VITE_WHATSAPP_NUMBER=918779355911
 ```
 
 ### 4. Run Locally

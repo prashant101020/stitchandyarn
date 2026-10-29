@@ -195,7 +195,7 @@ INSERT INTO categories (name, slug, description, image_url, sort_order) VALUES
 INSERT INTO site_settings (key, value) VALUES
   ('free_shipping_threshold', '599'),
   ('shipping_cost', '79'),
-  ('whatsapp_number', '919876543210'),
+  ('whatsapp_number', '918779355911'),
   ('instagram_url', 'https://instagram.com/stitchandyarn.deepa'),
   ('email', 'hello@stitchandyarn.in'),
   ('razorpay_enabled', 'false');

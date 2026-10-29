@@ -106,7 +106,7 @@ export function CustomOrderPage() {
             <Field label="Your Name *" id="co-name" value={form.name} error={errors.name}
               onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Priya" />
             <Field label="Phone *" id="co-phone" value={form.phone} error={errors.phone} type="tel"
-              onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="9876543210" />
+              onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="918779355911" />
             <Field label="Email" id="co-email" value={form.email} className="sm:col-span-2"
               onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="priya@example.com" />
           </div>
