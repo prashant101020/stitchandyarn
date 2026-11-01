@@ -1,5 +1,5 @@
 import { createClient, type User } from '@supabase/supabase-js';
-import type { CustomerUser } from '@/types';
+import type { CustomerUser, Address, CartItem, Order, OrderStatus, OrderItem } from '@/types';
 
 const supabaseUrl = (
   import.meta.env.SUPABASE_URL ||
@@ -298,4 +298,457 @@ export async function getInitialCustomer(): Promise<CustomerUser | null> {
 
   return null;
 }
+
+// ═══════════════════════════════════════════════════
+// Order Management (Direct Orders & Admin Sync)
+// ═══════════════════════════════════════════════════
+
+const LOCAL_ORDERS_KEY = 'stitch_yarn_orders';
+
+export async function submitDirectOrder({
+  customerId,
+  address,
+  items,
+  subtotal,
+  discount,
+  shipping,
+  total,
+  couponCode = '',
+  giftNote = '',
+  paymentMethod = 'cod',
+}: {
+  customerId?: string | null;
+  address: Address;
+  items: CartItem[];
+  subtotal: number;
+  discount: number;
+  shipping: number;
+  total: number;
+  couponCode?: string;
+  giftNote?: string;
+  paymentMethod?: 'cod' | 'whatsapp' | 'website';
+}): Promise<{ order: Order | null; error: string | null }> {
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const orderNumber = `SY-${dateStr}-${randomSuffix}`;
+
+  const validCustomerId =
+    customerId && !customerId.startsWith('demo_') ? customerId : null;
+
+  // 1. Live Supabase Order Insertion
+  if (supabase) {
+    try {
+      const orderPayload: Record<string, unknown> = {
+        order_number: orderNumber,
+        customer_name: address.full_name,
+        customer_phone: address.phone,
+        customer_email: address.email,
+        address_line1: address.address_line1,
+        address_line2: address.address_line2 || '',
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+        subtotal,
+        discount,
+        shipping,
+        total,
+        status: 'new',
+        payment_method: paymentMethod,
+        payment_status: 'pending',
+        coupon_code: couponCode || null,
+        gift_note: giftNote || '',
+      };
+
+      if (validCustomerId) {
+        orderPayload.customer_id = validCustomerId;
+      }
+
+      const { data: createdOrder, error: orderError } = await supabase
+        .from('orders')
+        .insert(orderPayload)
+        .select()
+        .single();
+
+      if (orderError) {
+        console.error('Supabase order creation error:', orderError);
+        if (orderError.code === 'PGRST205' || orderError.message.includes('orders')) {
+          return {
+            order: null,
+            error:
+              "The 'orders' table is not yet created in Supabase. Please run the provided SQL in your Supabase SQL Editor!",
+          };
+        }
+        return { order: null, error: orderError.message };
+      }
+
+      if (createdOrder) {
+        // Prepare items
+        const itemsPayload = items.map((item) => ({
+          order_id: createdOrder.id,
+          product_name: item.product.name,
+          product_image: item.product.images[0]?.url || '',
+          variant_selections: item.variant_selections || {},
+          personalisation: item.personalisation || {},
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.unit_price * item.quantity,
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(itemsPayload);
+
+        if (itemsError) {
+          console.warn('Could not insert order_items:', itemsError.message);
+        }
+
+        // Cache order in local storage for instant availability
+        saveOrderToLocalStorage(createdOrder, itemsPayload);
+
+        return {
+          order: {
+            ...createdOrder,
+            items: itemsPayload as unknown as OrderItem[],
+            address,
+          },
+          error: null,
+        };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to place order';
+      return { order: null, error: msg };
+    }
+  }
+
+  // 2. Fallback / Local Storage Mode (when previewing offline)
+  const fallbackOrder: Order = {
+    id: 'ord_' + Date.now(),
+    order_number: orderNumber,
+    customer_id: customerId || null,
+    customer_name: address.full_name,
+    customer_phone: address.phone,
+    customer_email: address.email,
+    address,
+    address_line1: address.address_line1,
+    address_line2: address.address_line2 || '',
+    city: address.city,
+    state: address.state,
+    pincode: address.pincode,
+    subtotal,
+    discount,
+    shipping,
+    total,
+    status: 'new',
+    payment_method: paymentMethod,
+    payment_status: 'pending',
+    coupon_code: couponCode,
+    gift_note: giftNote,
+    created_at: new Date().toISOString(),
+    items: items.map((i) => ({
+      product_name: i.product.name,
+      product_image: i.product.images[0]?.url || '',
+      variant_selections: i.variant_selections,
+      personalisation: i.personalisation,
+      quantity: i.quantity,
+      unit_price: i.unit_price,
+      total_price: i.unit_price * i.quantity,
+    })),
+  };
+
+  saveOrderToLocalStorage(fallbackOrder, fallbackOrder.items || []);
+  return { order: fallbackOrder, error: null };
+}
+
+function saveOrderToLocalStorage(order: unknown, items: unknown[] = []) {
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    const existing: unknown[] = raw ? JSON.parse(raw) : [];
+    const formatted = {
+      ...(typeof order === 'object' && order ? order : {}),
+      items,
+      order_items: items,
+    };
+    existing.unshift(formatted);
+    localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(existing.slice(0, 50)));
+  } catch {
+    // Ignore storage issues
+  }
+}
+
+// Fetch all orders belonging to a customer
+export async function getCustomerOrders(
+  customer: CustomerUser
+): Promise<{ orders: Order[]; error: string | null }> {
+  let cloudOrders: Order[] = [];
+
+  if (supabase) {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('*, order_items(*)')
+        .order('created_at', { ascending: false });
+
+      if (customer.id && !customer.id.startsWith('demo_')) {
+        const filters: string[] = [`customer_id.eq.${customer.id}`];
+        if (customer.phone) filters.push(`customer_phone.eq.${customer.phone}`);
+        if (customer.email) filters.push(`customer_email.eq.${customer.email}`);
+        query = query.or(filters.join(','));
+      } else if (customer.phone) {
+        query = query.eq('customer_phone', customer.phone);
+      } else if (customer.email) {
+        query = query.eq('customer_email', customer.email);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        cloudOrders = data.map((o) => ({
+          ...o,
+          items: o.order_items || [],
+        }));
+      }
+    } catch (err) {
+      console.warn('Error fetching customer orders from cloud:', err);
+    }
+  }
+
+  // Merge with any locally cached orders matching customer
+  let localOrders: Order[] = [];
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      const all: Order[] = JSON.parse(raw);
+      localOrders = all.filter(
+        (o) =>
+          (customer.phone && o.customer_phone === customer.phone) ||
+          (customer.email && o.customer_email === customer.email) ||
+          (customer.id && o.customer_id === customer.id)
+      );
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Deduplicate by order_number
+  const seen = new Set<string>();
+  const combined: Order[] = [];
+  for (const o of [...cloudOrders, ...localOrders]) {
+    if (!seen.has(o.order_number)) {
+      seen.add(o.order_number);
+      combined.push(o);
+    }
+  }
+
+  return { orders: combined, error: null };
+}
+
+// Fetch all orders for Admin
+export async function getAllOrdersForAdmin(): Promise<{
+  orders: Order[];
+  error: string | null;
+}> {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*)')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching admin orders from Supabase:', error);
+      } else if (data) {
+        const formatted: Order[] = data.map((o) => ({
+          ...o,
+          items: o.order_items || [],
+        }));
+        return { orders: formatted, error: null };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error fetching orders';
+      return { orders: [], error: msg };
+    }
+  }
+
+  // Fallback to local storage if supabase empty or preview mode
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      return { orders: JSON.parse(raw), error: null };
+    }
+  } catch {
+    // Ignore
+  }
+
+  return { orders: [], error: null };
+}
+
+// Update order status in Supabase (visible to customer immediately)
+export async function updateOrderStatusInDb(
+  orderId: string,
+  newStatus: OrderStatus
+): Promise<{ success: boolean; error: string | null }> {
+  let dbSuccess = false;
+
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', orderId);
+
+      if (error) {
+        console.error('Failed to update status in Supabase:', error);
+        return { success: false, error: error.message };
+      }
+      dbSuccess = true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Update failed';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Also update local storage cache
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      const all: Order[] = JSON.parse(raw);
+      const updated = all.map((o) =>
+        o.id === orderId || o.order_number === orderId
+          ? { ...o, status: newStatus }
+          : o
+      );
+      localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(updated));
+    }
+  } catch {
+    // Ignore
+  }
+
+  return { success: true, error: null };
+}
+
+// Check if the current authenticated user is an authorized admin
+export async function checkIsAdmin(): Promise<boolean> {
+  if (!supabase) {
+    try {
+      return localStorage.getItem('stitch_yarn_admin_session') === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return false;
+
+    // 1. Check if user is in admin_users table
+    const { data: adminRow, error: adminErr } = await supabase
+      .from('admin_users')
+      .select('id, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!adminErr && adminRow) {
+      return true;
+    }
+
+    // 2. Check metadata flag if set
+    if (
+      user.user_metadata?.is_admin === true ||
+      user.app_metadata?.role === 'admin'
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Sign out admin securely
+export async function signOutAdmin(): Promise<void> {
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Ignore
+    }
+  }
+  try {
+    localStorage.removeItem('stitch_yarn_admin_session');
+  } catch {
+    // Ignore
+  }
+}
+
+// Admin login verification with Supabase
+export async function verifyAdminLogin(
+  email: string,
+  password: string
+): Promise<{ success: boolean; error: string | null }> {
+  const trimmedEmail = email.trim().toLowerCase();
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (error) {
+        if (error.message.includes('Invalid login credentials')) {
+          return { success: false, error: 'Incorrect email or password.' };
+        }
+        if (error.message.includes('querying schema')) {
+          return {
+            success: false,
+            error:
+              'Supabase schema issue detected. Please run the repair SQL or create user via Supabase Dashboard.',
+          };
+        }
+        return { success: false, error: error.message };
+      }
+
+      if (data.user) {
+        // Strict Role Check: Verify this user is an admin, NOT a regular customer
+        const { data: adminRow } = await supabase
+          .from('admin_users')
+          .select('id, role')
+          .eq('id', data.user.id)
+          .maybeSingle();
+
+        const isMetaAdmin =
+          data.user.user_metadata?.is_admin === true ||
+          data.user.app_metadata?.role === 'admin';
+
+        if (!adminRow && !isMetaAdmin) {
+          // A customer attempted to log into /admin! Immediately sign out and reject
+          await supabase.auth.signOut();
+          return {
+            success: false,
+            error:
+              'Access Denied: This account is registered as a customer and does not have Admin privileges.',
+          };
+        }
+
+        return { success: true, error: null };
+      }
+
+      return { success: false, error: 'Authentication failed.' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Preview Mode ONLY (fallback when no Supabase project is connected)
+  if (trimmedEmail && password) {
+    return { success: true, error: null };
+  }
+
+  return { success: false, error: 'Please enter valid email and password' };
+}
+
 

@@ -285,3 +285,163 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_customer();
+
+-- ═══════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════
+-- SECURE ROLE-BASED ACCESS CONTROL (RBAC) & ORDERS UPGRADE
+-- Run this in Supabase SQL Editor
+-- ═══════════════════════════════════════════════════════
+
+-- 1. Create dedicated admin_users table
+CREATE TABLE IF NOT EXISTS public.admin_users (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
+
+-- Only authenticated users can check if their own UUID is in admin_users
+DROP POLICY IF EXISTS "Users can check own admin status" ON public.admin_users;
+CREATE POLICY "Users can check own admin status" ON public.admin_users
+  FOR SELECT USING (auth.uid() = id);
+
+-- Helper function to check if the current user is an admin
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.admin_users WHERE id = auth.uid()
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2. Ensure customer_id exists on orders table
+ALTER TABLE public.orders 
+  ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- 3. Allow 'website' as a payment method
+ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
+ALTER TABLE public.orders ADD CONSTRAINT orders_payment_method_check 
+  CHECK (payment_method IN ('razorpay', 'whatsapp', 'cod', 'website'));
+
+-- 4. Secure RLS Policies on Orders and Order Items
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can place an order at checkout
+DROP POLICY IF EXISTS "Public can create orders" ON orders;
+CREATE POLICY "Public can create orders" ON orders FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public can create order items" ON order_items;
+CREATE POLICY "Public can create order items" ON order_items FOR INSERT WITH CHECK (true);
+
+-- Admins can view ALL orders; Customers can ONLY view their own orders
+DROP POLICY IF EXISTS "Public can read own orders" ON orders;
+CREATE POLICY "Public can read own orders" ON orders FOR SELECT USING (
+  public.is_admin() 
+  OR customer_id = auth.uid()
+  OR customer_phone = (SELECT phone FROM public.customers WHERE id = auth.uid())
+  OR customer_email = (SELECT email FROM public.customers WHERE id = auth.uid())
+);
+
+DROP POLICY IF EXISTS "Public can read order items" ON order_items;
+CREATE POLICY "Public can read order items" ON order_items FOR SELECT USING (
+  public.is_admin()
+  OR EXISTS (
+    SELECT 1 FROM orders 
+    WHERE orders.id = order_items.order_id 
+      AND (
+        orders.customer_id = auth.uid() 
+        OR orders.customer_phone = (SELECT phone FROM public.customers WHERE id = auth.uid())
+        OR orders.customer_email = (SELECT email FROM public.customers WHERE id = auth.uid())
+      )
+  )
+);
+
+-- ONLY verified Admins can update orders (e.g. change status to making, shipped, delivered)
+DROP POLICY IF EXISTS "Admin update orders" ON orders;
+DROP POLICY IF EXISTS "Admin full access orders" ON orders;
+CREATE POLICY "Only admin can update orders" ON orders FOR UPDATE 
+  USING (public.is_admin()) 
+  WITH CHECK (public.is_admin());
+
+-- 5. Repair any NULL token fields in auth.users that cause "Database error querying schema"
+UPDATE auth.users
+SET confirmation_token = COALESCE(confirmation_token, ''),
+    email_change = COALESCE(email_change, ''),
+    email_change_token_new = COALESCE(email_change_token_new, ''),
+    recovery_token = COALESCE(recovery_token, ''),
+    email_change_token_current = COALESCE(email_change_token_current, ''),
+    phone_change = COALESCE(phone_change, ''),
+    phone_change_token = COALESCE(phone_change_token, '')
+WHERE confirmation_token IS NULL 
+   OR email_change IS NULL 
+   OR email_change_token_new IS NULL 
+   OR recovery_token IS NULL;
+
+-- 6. Add Admin User and register into admin_users table
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+DO $$
+DECLARE
+  v_admin_id UUID;
+BEGIN
+  -- Check if user already exists
+  SELECT id INTO v_admin_id FROM auth.users WHERE email = 'admin@stitchandyarn.in';
+
+  IF v_admin_id IS NOT NULL THEN
+    UPDATE auth.users
+    SET encrypted_password = crypt('admin12345', gen_salt('bf')),
+        email_confirmed_at = now(),
+        confirmation_token = '',
+        recovery_token = '',
+        email_change = '',
+        email_change_token_new = '',
+        raw_user_meta_data = '{"full_name":"Deepa (Admin)","is_admin":true}'::jsonb,
+        updated_at = now()
+    WHERE id = v_admin_id;
+  ELSE
+    v_admin_id := gen_random_uuid();
+    INSERT INTO auth.users (
+      id,
+      instance_id,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      confirmation_token,
+      recovery_token,
+      email_change,
+      email_change_token_new,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      role,
+      aud,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      v_admin_id,
+      '00000000-0000-0000-0000-000000000000',
+      'admin@stitchandyarn.in',
+      crypt('admin12345', gen_salt('bf')),
+      now(),
+      '',
+      '',
+      '',
+      '',
+      '{"provider":"email","providers":["email"]}',
+      '{"full_name":"Deepa (Admin)","is_admin":true}',
+      'authenticated',
+      'authenticated',
+      now(),
+      now()
+    );
+  END IF;
+
+  -- Ensure record exists in public.admin_users
+  INSERT INTO public.admin_users (id, email, role)
+  VALUES (v_admin_id, 'admin@stitchandyarn.in', 'admin')
+  ON CONFLICT (email) DO UPDATE SET id = v_admin_id;
+END $$;

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle, Package, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCartStore, useAuthStore } from '@/store';
 import { formatPrice, siteSettings } from '@/data';
 import { FadeUp } from '@/components/UI';
 import type { Address } from '@/types';
+import { submitDirectOrder } from '@/lib/supabase';
 
 // Indian states for dropdown
 const INDIAN_STATES = [
@@ -126,6 +127,46 @@ export function CheckoutPage() {
     window.open(`https://wa.me/${siteSettings.whatsapp_number}?text=${encodeURIComponent(msg)}`, '_blank');
     clearCart();
     navigate('/order-confirmation/whatsapp');
+  };
+
+  const handlePlaceOrderOnline = async () => {
+    if (!validate()) {
+      toast.error('Please fill in all required delivery fields');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const res = await submitDirectOrder({
+        customerId: customer?.id,
+        address,
+        items,
+        subtotal,
+        discount: couponDiscount,
+        shipping,
+        total,
+        couponCode,
+        giftNote,
+        paymentMethod: 'website',
+      });
+
+      if (res.error) {
+        toast.error(res.error || 'Failed to place order. Please try again.');
+        return;
+      }
+
+      if (res.order) {
+        clearCart();
+        toast.success('Your order has been placed successfully! 🎉', { duration: 4500 });
+        navigate(`/order-confirmation/${res.order.order_number}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to place order';
+      toast.error(msg);
+    } finally {
+      setProcessing(false);
+    }
   };
 
   return (
@@ -300,7 +341,35 @@ export function CheckoutPage() {
 
             {/* Payment buttons */}
             <div className="mt-6 space-y-3">
+              {/* Option 1: Direct Order on Website (saves directly to Supabase DB) */}
               <button
+                type="button"
+                onClick={handlePlaceOrderOnline}
+                disabled={processing}
+                className="btn btn-primary w-full justify-center gap-2 py-3.5 text-sm font-semibold shadow-card hover:shadow-glow disabled:opacity-50 cursor-pointer"
+              >
+                {processing ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Package size={18} />
+                    Place Order on Website ✨
+                  </>
+                )}
+              </button>
+
+              <div className="relative py-1 text-center">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-rose-line/20" />
+                </div>
+                <span className="relative bg-surface px-3 text-[11px] font-semibold uppercase tracking-wider text-cocoa-light/60">
+                  Or
+                </span>
+              </div>
+
+              {/* Option 2: Order via WhatsApp */}
+              <button
+                type="button"
                 onClick={handleOrderViaWhatsApp}
                 disabled={processing}
                 className="btn w-full justify-center gap-2 bg-[#25D366] text-white hover:bg-[#20bd5a] disabled:opacity-50"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,13 +14,21 @@ import {
   Package,
   Heart,
   LogOut,
+  ShoppingBag,
+  RefreshCw,
+  MapPin,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store';
+import { formatPrice } from '@/data';
+import type { Order } from '@/types';
 import {
   signUpCustomer,
   signInCustomer,
   isSupabaseConfigured,
+  getCustomerOrders,
 } from '@/lib/supabase';
 
 interface AuthPageProps {
@@ -52,47 +60,322 @@ export function AuthPage({ initialMode }: AuthPageProps) {
   // Destination to redirect back to (e.g. if redirected from checkout)
   const from = (location.state as { from?: string })?.from || '/';
 
-  // If customer is already logged in
+  // Customer Profile & My Orders state
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [profileTab, setProfileTab] = useState<'orders' | 'profile'>('orders');
+
+  const fetchOrders = () => {
+    if (!customer) return;
+    setOrdersLoading(true);
+    getCustomerOrders(customer)
+      .then((res) => setCustomerOrders(res.orders || []))
+      .catch(() => toast.error('Could not load orders'))
+      .finally(() => setOrdersLoading(false));
+  };
+
+  useEffect(() => {
+    if (customer) {
+      fetchOrders();
+    }
+  }, [customer]);
+
+  const statusConfigs: Record<string, { label: string; badgeClass: string; icon: string }> = {
+    new: { label: 'Order Received', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200', icon: '🟡' },
+    confirmed: { label: 'Confirmed', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200', icon: '🔵' },
+    making: { label: 'Crocheting with Love', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200', icon: '🧶' },
+    shipped: { label: 'Shipped & On The Way', badgeClass: 'bg-teal-100 text-teal-800 border-teal-200', icon: '🚚' },
+    delivered: { label: 'Delivered', badgeClass: 'bg-green-100 text-green-800 border-green-200', icon: '🎉' },
+    cancelled: { label: 'Cancelled', badgeClass: 'bg-red-100 text-red-800 border-red-200', icon: '⚪' },
+  };
+
+  // If customer is already logged in -> Show Account & My Orders Dashboard
   if (customer) {
     return (
-      <main className="min-h-[70vh] flex items-center justify-center px-4 py-12">
+      <main className="min-h-[85vh] py-8 sm:py-12 px-4 max-w-4xl mx-auto">
+        {/* Profile Header */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-surface border border-rose-line/30 rounded-3xl p-8 shadow-card text-center"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-surface border border-rose-line/30 rounded-3xl p-6 sm:p-8 shadow-card mb-6"
         >
-          <div className="w-16 h-16 rounded-full bg-blush-light text-primary flex items-center justify-center mx-auto mb-4 text-2xl font-semibold">
-            {customer.name?.charAt(0).toUpperCase() || '✨'}
-          </div>
-          <span className="badge badge-sage mb-2">Logged In</span>
-          <h1 className="font-heading text-2xl font-semibold text-cocoa">
-            Welcome back, {customer.name}! 💕
-          </h1>
-          <p className="text-sm text-cocoa-light mt-1 mb-6">
-            {customer.email || (customer.phone ? `Phone: ${customer.phone}` : 'Account active')}
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-blush-light text-primary flex items-center justify-center text-2xl font-bold shadow-soft">
+                {customer.name?.charAt(0).toUpperCase() || '✨'}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="font-heading text-2xl sm:text-3xl font-semibold text-cocoa">
+                    {customer.name}
+                  </h1>
+                  <span className="badge badge-sage text-[0.65rem]">Member</span>
+                </div>
+                <p className="text-xs sm:text-sm text-cocoa-light mt-0.5">
+                  {customer.email || (customer.phone ? `Mobile: ${customer.phone}` : 'Stitch & Yarn Customer')}
+                </p>
+              </div>
+            </div>
 
-          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/shop')}
+                className="btn btn-primary text-xs sm:text-sm py-2 px-4"
+              >
+                Shop Now <ArrowRight size={14} />
+              </button>
+              <button
+                onClick={async () => {
+                  await logout();
+                  toast.success('Signed out successfully.');
+                }}
+                className="btn btn-ghost text-xs text-cocoa-light hover:text-red-600 gap-1.5 py-2 px-3 border border-rose-line/20 rounded-full"
+                title="Sign out"
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
+            </div>
+          </div>
+
+          {/* Profile Navigation Tabs */}
+          <div className="mt-8 pt-4 border-t border-rose-line/20 flex gap-2">
             <button
-              onClick={() => navigate(from === '/' ? '/shop' : from)}
-              className="btn btn-primary w-full"
+              onClick={() => setProfileTab('orders')}
+              className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-semibold transition-all ${
+                profileTab === 'orders'
+                  ? 'bg-primary text-white shadow-soft'
+                  : 'bg-cream-dark/50 text-cocoa-light hover:text-cocoa'
+              }`}
             >
-              Continue Shopping <ArrowRight size={16} />
+              <Package size={16} /> My Orders ({customerOrders.length})
             </button>
-            <Link to="/track-order" className="btn btn-secondary w-full">
-              Track My Orders
-            </Link>
             <button
-              onClick={async () => {
-                await logout();
-                toast.success('You have been signed out.');
-              }}
-              className="btn btn-ghost w-full text-cocoa-light hover:text-red-600 gap-2"
+              onClick={() => setProfileTab('profile')}
+              className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-semibold transition-all ${
+                profileTab === 'profile'
+                  ? 'bg-primary text-white shadow-soft'
+                  : 'bg-cream-dark/50 text-cocoa-light hover:text-cocoa'
+              }`}
             >
-              <LogOut size={16} /> Sign Out
+              <User size={16} /> Profile Details
             </button>
           </div>
         </motion.div>
+
+        {/* Tab 1: My Orders */}
+        {profileTab === 'orders' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="font-heading text-xl font-medium text-cocoa flex items-center gap-2">
+                <ShoppingBag size={20} className="text-primary" /> Past Orders & Live Status
+              </h2>
+              <button
+                onClick={fetchOrders}
+                disabled={ordersLoading}
+                className="btn btn-ghost text-xs text-cocoa-light hover:text-primary gap-1 py-1 px-3"
+              >
+                <RefreshCw size={13} className={ordersLoading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
+
+            {ordersLoading ? (
+              <div className="bg-surface rounded-2xl p-12 text-center border border-rose-line/20">
+                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-sm text-cocoa-light">Loading your orders...</p>
+              </div>
+            ) : customerOrders.length === 0 ? (
+              <div className="bg-surface rounded-3xl p-10 text-center border border-rose-line/20 shadow-soft">
+                <p className="text-5xl mb-3">🧶</p>
+                <h3 className="font-heading text-xl font-semibold text-cocoa mb-1">
+                  No orders yet!
+                </h3>
+                <p className="text-sm text-cocoa-light max-w-md mx-auto mb-6">
+                  You haven't ordered any handmade pieces yet. Place an order today and track its crafting journey here!
+                </p>
+                <Link to="/shop" className="btn btn-primary">
+                  Explore Handmade Creations
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {customerOrders.map((order) => {
+                  const itemsList = order.items || order.order_items || [];
+                  const statusConf = statusConfigs[order.status] || {
+                    label: order.status,
+                    badgeClass: 'bg-cream-dark text-cocoa',
+                    icon: '📦',
+                  };
+
+                  return (
+                    <motion.div
+                      key={order.id || order.order_number}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-surface border border-rose-line/30 rounded-3xl p-5 sm:p-6 shadow-soft"
+                    >
+                      {/* Order Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-rose-line/15">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-sm text-cocoa">
+                              {order.order_number}
+                            </span>
+                            <span
+                              className={`badge border text-[0.7rem] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 ${statusConf.badgeClass}`}
+                            >
+                              <span>{statusConf.icon}</span> {statusConf.label}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-cocoa-light/80 mt-1">
+                            <span className="flex items-center gap-1">
+                              <Calendar size={13} />
+                              {new Date(order.created_at).toLocaleDateString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </span>
+                            <span>•</span>
+                            <span>Payment: {order.payment_method?.toUpperCase()}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right sm:text-right">
+                          <p className="text-xs text-cocoa-light">Order Total</p>
+                          <p className="font-heading text-xl font-bold text-primary">
+                            {formatPrice(order.total)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Items */}
+                      <div className="py-4 space-y-3">
+                        {itemsList.map((item, idx) => {
+                          const variants = item.variant_selections
+                            ? Object.entries(item.variant_selections)
+                            : [];
+                          const personLetter =
+                            typeof item.personalisation === 'object'
+                              ? item.personalisation?.initial_letter
+                              : item.personalisation;
+
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center gap-3.5 bg-cream/50 rounded-2xl p-3 border border-rose-line/10"
+                            >
+                              {item.product_image ? (
+                                <img
+                                  src={item.product_image}
+                                  alt={item.product_name || item.name || 'Handmade item'}
+                                  className="w-14 h-16 object-cover rounded-xl shrink-0 border border-rose-line/20"
+                                />
+                              ) : (
+                                <div className="w-14 h-16 bg-blush-light rounded-xl flex items-center justify-center text-primary text-xl shrink-0">
+                                  🧶
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-sm text-cocoa truncate">
+                                  {item.product_name || item.name}
+                                </h4>
+                                <div className="text-xs text-cocoa-light/80 flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
+                                  <span>Qty: {item.quantity || item.qty || 1}</span>
+                                  {variants.length > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{variants.map(([k, v]) => `${k}: ${v}`).join(', ')}</span>
+                                    </>
+                                  )}
+                                  {personLetter && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-primary font-medium">Letter: {personLetter}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="font-semibold text-sm text-cocoa">
+                                  {formatPrice(
+                                    item.total_price || (item.unit_price || 0) * (item.quantity || item.qty || 1)
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Delivery Address & Status Note */}
+                      <div className="pt-3 border-t border-rose-line/15 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-cocoa-light gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <MapPin size={13} className="text-primary shrink-0" />
+                          <span>
+                            Delivery to:{' '}
+                            <strong className="text-cocoa font-medium">
+                              {order.customer_name}
+                            </strong>
+                            ,{' '}
+                            {order.address_line1 || order.address?.address_line1 || ''},{' '}
+                            {order.city || order.address?.city || ''}{' '}
+                            {order.pincode || order.address?.pincode || ''}
+                          </span>
+                        </div>
+                        <span className="text-[0.7rem] bg-blush-light/50 text-cocoa-light px-2.5 py-1 rounded-full w-fit">
+                          Live status updates synced with shop
+                        </span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Profile Details */}
+        {profileTab === 'profile' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-surface border border-rose-line/30 rounded-3xl p-6 sm:p-8 shadow-card space-y-5"
+          >
+            <h2 className="font-heading text-xl font-medium text-cocoa mb-4 flex items-center gap-2">
+              <User size={20} className="text-primary" /> Personal Information
+            </h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Full Name</span>
+                <p className="font-medium text-cocoa text-sm">{customer.name || 'Not provided'}</p>
+              </div>
+
+              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Email Address</span>
+                <p className="font-medium text-cocoa text-sm">{customer.email || 'None on file'}</p>
+              </div>
+
+              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Mobile Number</span>
+                <p className="font-medium text-cocoa text-sm">{customer.phone || 'None on file'}</p>
+              </div>
+
+              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Account ID</span>
+                <p className="font-mono text-xs text-cocoa-light/80 truncate">{customer.id}</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-blush-light/30 border border-rose-line/20 rounded-2xl text-xs text-cocoa-light flex items-center gap-3">
+              <Sparkles size={20} className="text-primary shrink-0" />
+              <p>
+                Your details automatically pre-fill at checkout so you can complete handcrafted orders with a single tap.
+              </p>
+            </div>
+          </motion.div>
+        )}
       </main>
     );
   }

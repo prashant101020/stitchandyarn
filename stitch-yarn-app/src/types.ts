@@ -72,16 +72,23 @@ export interface Address {
 }
 
 export type OrderStatus = 'new' | 'confirmed' | 'making' | 'shipped' | 'delivered' | 'cancelled';
-export type PaymentMethod = 'razorpay' | 'whatsapp' | 'cod';
+export type PaymentMethod = 'razorpay' | 'whatsapp' | 'cod' | 'website';
 
 export interface Order {
   id: string;
   order_number: string;
+  customer_id?: string | null;
   customer_name: string;
   customer_phone: string;
   customer_email: string;
-  address: Address;
-  items: OrderItem[];
+  address?: Address;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  items?: OrderItem[];
+  order_items?: OrderItem[];
   subtotal: number;
   discount: number;
   shipping: number;
@@ -92,20 +99,22 @@ export interface Order {
   coupon_code?: string;
   gift_note?: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface OrderItem {
-  id: string;
-  order_id: string;
-  product_id: string;
-  product_name: string;
-  product_image: string;
-  variant_selections: Record<string, string>;
-  personalisation: PersonalisationData;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
+  id?: string;
+  order_id?: string;
+  product_id?: string;
+  product_name?: string;
+  product_image?: string;
+  name?: string;
+  qty?: number;
+  variant_selections?: Record<string, string>;
+  personalisation?: PersonalisationData | string;
+  quantity?: number;
+  unit_price?: number;
+  total_price?: number;
 }
 
 export interface Coupon {
