@@ -1,8 +1,17 @@
 import { createClient, type User } from '@supabase/supabase-js';
 import type { CustomerUser } from '@/types';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+const supabaseUrl = (
+  import.meta.env.SUPABASE_URL ||
+  import.meta.env.VITE_SUPABASE_URL ||
+  ''
+).trim();
+
+const supabaseAnonKey = (
+  import.meta.env.SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  ''
+).trim();
 
 export const isSupabaseConfigured = (): boolean => {
   return (

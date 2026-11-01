@@ -59,8 +59,8 @@ npm install
 2. Go to **SQL Editor** → **New Query**
 3. Paste the contents of `supabase-schema.sql` and run it
 4. Go to **Settings** → **API** and copy:
-   - Project URL → `VITE_SUPABASE_URL`
-   - `anon` public key → `VITE_SUPABASE_ANON_KEY`
+   - Project URL → `SUPABASE_URL`
+   - `anon` public key → `SUPABASE_ANON_KEY`
 
 ### 3. Configure Environment
 
@@ -71,8 +71,8 @@ cp .env.example .env
 Edit `.env` with your Supabase credentials:
 
 ```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
 VITE_RAZORPAY_KEY_ID=        # Leave empty for WhatsApp-only mode
 VITE_WHATSAPP_NUMBER=918779355911
 ```
@@ -115,8 +115,8 @@ Output is in `dist/`.
    - **Build command:** `npm run build`
    - **Build output directory:** `dist`
 4. Add environment variables in the Cloudflare dashboard:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
    - `VITE_RAZORPAY_KEY_ID` (if using Razorpay)
    - `VITE_WHATSAPP_NUMBER`
 
