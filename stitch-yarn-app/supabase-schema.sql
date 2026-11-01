@@ -231,3 +231,57 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER update_products_timestamp BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER update_orders_timestamp BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ═══════════════════════════════════════════
+-- Customers & Profiles (Authentication)
+-- ═══════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.customers (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT '',
+  email TEXT,
+  phone TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own customer profile" ON public.customers
+  FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Users can update own customer profile" ON public.customers
+  FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Users can insert own customer profile" ON public.customers
+  FOR INSERT WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Admin can view all customers" ON public.customers
+  FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+
+-- Automatically create customer profile when user signs up in Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_new_customer()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.customers (id, name, email, phone)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', ''),
+    CASE 
+      WHEN NEW.email LIKE '%@customer.stitchandyarn.in' THEN NULL 
+      ELSE NEW.email 
+    END,
+    COALESCE(NEW.raw_user_meta_data->>'phone', '')
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    email = COALESCE(EXCLUDED.email, public.customers.email),
+    phone = COALESCE(EXCLUDED.phone, public.customers.phone),
+    updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_customer();

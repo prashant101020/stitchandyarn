@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, Menu, X, Search, Heart } from 'lucide-react';
+import { ShoppingBag, Menu, X, Search, Heart, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useCartStore } from '@/store';
+import { useCartStore, useAuthStore } from '@/store';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -16,6 +16,7 @@ export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const { openCart, getItemCount } = useCartStore();
+  const { customer } = useAuthStore();
   const itemCount = getItemCount();
 
   return (
@@ -81,6 +82,31 @@ export function Navbar() {
             >
               <Search size={20} />
             </Link>
+
+            {customer ? (
+              <Link
+                to="/account"
+                className="btn-ghost flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold bg-blush-light/50 text-cocoa hover:bg-blush-light"
+                title={`Logged in as ${customer.name}`}
+              >
+                <div className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[10px]">
+                  {customer.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <span className="hidden sm:inline max-w-[80px] truncate">
+                  {customer.name?.split(' ')[0]}
+                </span>
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                className="btn-ghost p-2 rounded-full text-cocoa-light hover:text-primary"
+                aria-label="Sign in or register"
+                title="Sign In / Register"
+              >
+                <UserIcon size={20} />
+              </Link>
+            )}
+
             <button
               onClick={openCart}
               className="btn-ghost p-2 rounded-full relative"
@@ -143,6 +169,20 @@ export function Navbar() {
                     {link.label}
                   </Link>
                 ))}
+                {/* Account Link in Mobile Menu */}
+                <Link
+                  to={customer ? "/account" : "/login"}
+                  onClick={() => setMobileOpen(false)}
+                  className="py-3 px-4 rounded-lg text-base font-medium transition-colors flex items-center justify-between text-cocoa hover:bg-cream-dark mt-2 bg-cream-dark/50 border border-rose-line/30"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <UserIcon size={18} className="text-primary" />
+                    {customer ? `Hi, ${customer.name.split(' ')[0]}` : 'Sign In / Register'}
+                  </span>
+                  <span className="badge badge-blush text-[0.65rem]">
+                    {customer ? 'Account' : 'Login'}
+                  </span>
+                </Link>
               </div>
               <div className="mt-8 pt-6 border-t border-rose-line/20">
                 <p className="label-caps text-cocoa-light mb-2">Follow us</p>

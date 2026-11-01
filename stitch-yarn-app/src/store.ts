@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { CartItem, Product, PersonalisationData } from './types';
+import type { CartItem, Product, PersonalisationData, CustomerUser } from './types';
 import { siteSettings } from './data';
+import { supabase, getInitialCustomer, signOutCustomer, mapSupabaseUserToCustomer } from './lib/supabase';
 
 interface CartStore {
   items: CartItem[];
@@ -136,6 +137,46 @@ export const useCartStore = create<CartStore>()(
         couponDiscount: state.couponDiscount,
         giftNote: state.giftNote,
       }),
+    }
+  )
+);
+
+interface AuthStore {
+  customer: CustomerUser | null;
+  isLoading: boolean;
+  setCustomer: (customer: CustomerUser | null) => void;
+  logout: () => Promise<void>;
+  initializeAuth: () => Promise<void>;
+}
+
+export const useAuthStore = create<AuthStore>()(
+  persist(
+    (set) => ({
+      customer: null,
+      isLoading: true,
+      setCustomer: (customer) => set({ customer, isLoading: false }),
+      logout: async () => {
+        await signOutCustomer();
+        set({ customer: null, isLoading: false });
+      },
+      initializeAuth: async () => {
+        const user = await getInitialCustomer();
+        set({ customer: user, isLoading: false });
+
+        if (supabase) {
+          supabase.auth.onAuthStateChange((_event, session) => {
+            if (session?.user) {
+              set({ customer: mapSupabaseUserToCustomer(session.user), isLoading: false });
+            } else {
+              set({ customer: null, isLoading: false });
+            }
+          });
+        }
+      },
+    }),
+    {
+      name: 'stitch-yarn-auth',
+      partialize: (state) => ({ customer: state.customer }),
     }
   )
 );

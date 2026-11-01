@@ -151,3 +151,11 @@ export interface Testimonial {
   product_name?: string;
   avatar_initial: string;
 }
+
+export interface CustomerUser {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  created_at?: string;
+}

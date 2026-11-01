@@ -6,6 +6,7 @@ import { Footer } from '@/components/Footer';
 import { CartDrawer } from '@/components/CartDrawer';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
 import { useEffect } from 'react';
+import { useAuthStore } from '@/store';
 
 // Code-split all route pages for performance
 const HomePage = lazy(() => import('@/pages/Home').then(m => ({ default: m.HomePage })));
@@ -22,6 +23,7 @@ const ShippingReturnsPage = lazy(() => import('@/pages/ShippingReturns').then(m 
 const PrivacyPage = lazy(() => import('@/pages/Privacy').then(m => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('@/pages/Terms').then(m => ({ default: m.TermsPage })));
 const AdminPage = lazy(() => import('@/pages/Admin').then(m => ({ default: m.AdminPage })));
+const AuthPage = lazy(() => import('@/pages/Auth').then(m => ({ default: m.AuthPage })));
 
 // Scroll to top on route change
 function ScrollToTop() {
@@ -77,6 +79,10 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const initializeAuth = useAuthStore((state) => state.initializeAuth);
+  useEffect(() => {
+    initializeAuth();
+  }, [initializeAuth]);
   return (
     <BrowserRouter>
       <ScrollToTop />
@@ -102,6 +108,9 @@ export default function App() {
           <Route path="/shipping-returns" element={<ShippingReturnsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
+          <Route path="/login" element={<AuthPage initialMode="login" />} />
+          <Route path="/register" element={<AuthPage initialMode="register" />} />
+          <Route path="/account" element={<AuthPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

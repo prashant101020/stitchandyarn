@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useCartStore } from '@/store';
+import { useCartStore, useAuthStore } from '@/store';
 import { formatPrice, siteSettings } from '@/data';
 import { FadeUp } from '@/components/UI';
 import type { Address } from '@/types';
@@ -36,11 +36,25 @@ export function CheckoutPage() {
     couponCode, couponDiscount, giftNote,
     setGiftNote, clearCart,
   } = useCartStore();
+  const { customer } = useAuthStore();
 
   const [address, setAddress] = useState<Address>({
-    full_name: '', phone: '', email: '',
+    full_name: customer?.name || '',
+    phone: customer?.phone || '',
+    email: customer?.email || '',
     address_line1: '', address_line2: '', city: '', state: '', pincode: '',
   });
+
+  useEffect(() => {
+    if (customer) {
+      setAddress(prev => ({
+        ...prev,
+        full_name: prev.full_name || customer.name || '',
+        phone: prev.phone || customer.phone || '',
+        email: prev.email || customer.email || '',
+      }));
+    }
+  }, [customer]);
   const [couponInput, setCouponInput] = useState('');
   const [showGiftNote, setShowGiftNote] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -133,6 +147,18 @@ export function CheckoutPage() {
               <h2 className="font-heading text-xl font-medium text-cocoa mb-5 flex items-center gap-2">
                 <Truck size={20} className="text-primary" /> Delivery Details
               </h2>
+              {!customer && (
+                <div className="mb-5 p-3 bg-blush-light/50 border border-rose-line/30 rounded-xl flex items-center justify-between text-xs text-cocoa">
+                  <span>Already have a Stitch & Yarn account?</span>
+                  <Link
+                    to="/login"
+                    state={{ from: '/checkout' }}
+                    className="text-primary font-semibold hover:underline shrink-0 ml-2"
+                  >
+                    Sign in to prefill →
+                  </Link>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <InputField label="Full Name *" id="full_name" value={address.full_name} error={errors.full_name}
                   onChange={v => setAddress(a => ({ ...a, full_name: v }))} placeholder="Priya Sharma" />
