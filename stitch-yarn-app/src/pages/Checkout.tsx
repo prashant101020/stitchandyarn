@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle, Package, Sparkles, ShieldCheck, Lock, X } from 'lucide-react';
+import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle, Package, Sparkles, ShieldCheck, Lock, X, Loader2, MapPin } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCartStore, useAuthStore } from '@/store';
 import { formatPrice, siteSettings } from '@/data';
@@ -18,6 +18,17 @@ const INDIAN_STATES = [
   'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi', 'Chandigarh',
   'Jammu and Kashmir', 'Ladakh', 'Puducherry',
 ];
+
+// Fuzzy matching to match API state names to dropdown list
+function matchIndianState(rawState: string): string {
+  if (!rawState) return '';
+  const clean = rawState.toLowerCase().replace(/&/g, 'and').trim();
+  const found = INDIAN_STATES.find(s => {
+    const sClean = s.toLowerCase().replace(/&/g, 'and').trim();
+    return sClean === clean || sClean.includes(clean) || clean.includes(sClean);
+  });
+  return found || rawState;
+}
 
 function validatePincode(pin: string): boolean {
   return /^[1-9][0-9]{5}$/.test(pin);
@@ -51,9 +62,9 @@ export function CheckoutPage() {
     if (customer) {
       setAddress(prev => ({
         ...prev,
-        full_name: prev.full_name || customer.name || '',
-        phone: prev.phone || customer.phone || '',
-        email: prev.email || customer.email || '',
+        full_name: customer.name || prev.full_name,
+        phone: customer.phone || prev.phone,
+        email: customer.email || prev.email,
       }));
     }
   }, [customer]);
@@ -62,6 +73,72 @@ export function CheckoutPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [processing, setProcessing] = useState(false);
   const [showKeyNoticeModal, setShowKeyNoticeModal] = useState(false);
+  const [pincodeLoading, setPincodeLoading] = useState(false);
+  const pincodeCache = useRef<Record<string, { city: string; state: string }>>({});
+
+  // Auto-fetch city & state from postalpincode API
+  const fetchPincodeDetails = async (pin: string) => {
+    if (pincodeCache.current[pin]) {
+      const cached = pincodeCache.current[pin];
+      setAddress(prev => ({
+        ...prev,
+        city: prev.city || cached.city,
+        state: prev.state || cached.state,
+      }));
+      return;
+    }
+
+    setPincodeLoading(true);
+    try {
+      const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+      const data = await res.json();
+
+      if (
+        Array.isArray(data) &&
+        data[0]?.Status === 'Success' &&
+        data[0]?.PostOffice &&
+        data[0].PostOffice.length > 0
+      ) {
+        const po = data[0].PostOffice[0];
+        const detectedCity = po.District || po.Division || po.Block || po.Name || '';
+        const detectedState = matchIndianState(po.State || '');
+
+        pincodeCache.current[pin] = { city: detectedCity, state: detectedState };
+
+        setAddress(prev => ({
+          ...prev,
+          city: detectedCity,
+          state: detectedState,
+        }));
+
+        setErrors(prev => {
+          const next = { ...prev };
+          delete next.pincode;
+          if (detectedCity) delete next.city;
+          if (detectedState) delete next.state;
+          return next;
+        });
+
+        toast.success(`Auto-filled: ${detectedCity}, ${detectedState} 📍`, {
+          icon: '📍',
+          duration: 3000,
+        });
+      }
+    } catch (err) {
+      console.warn('Could not auto-fetch pincode details:', err);
+    } finally {
+      setPincodeLoading(false);
+    }
+  };
+
+  const handlePincodeChange = (val: string) => {
+    const cleanPin = val.replace(/\D/g, '').slice(0, 6);
+    setAddress(prev => ({ ...prev, pincode: cleanPin }));
+
+    if (cleanPin.length === 6) {
+      fetchPincodeDetails(cleanPin);
+    }
+  };
 
   const subtotal = getSubtotal();
   const shipping = getShipping();
@@ -271,12 +348,39 @@ export function CheckoutPage() {
                   onChange={v => setAddress(a => ({ ...a, email: v }))} placeholder="priya@example.com" />
                 <InputField label="Address Line 1 *" id="address1" value={address.address_line1} error={errors.address_line1} className="sm:col-span-2"
                   onChange={v => setAddress(a => ({ ...a, address_line1: v }))} placeholder="House/Flat No., Building, Street" />
-                <InputField label="Address Line 2" id="address2" value={address.address_line2 || ''}
-                  onChange={v => setAddress(a => ({ ...a, address_line2: v }))} placeholder="Landmark (optional)" />
-                <InputField label="City *" id="city" value={address.city} error={errors.city}
-                  onChange={v => setAddress(a => ({ ...a, city: v }))} placeholder="Mumbai" />
-                <div>
-                  <label htmlFor="state" className="label-caps text-cocoa-light block mb-1.5">State *</label>
+                <InputField label="Address Line 2" id="address2" value={address.address_line2 || ''} className="sm:col-span-2"
+                  onChange={v => setAddress(a => ({ ...a, address_line2: v }))} placeholder="Landmark, Area (optional)" />
+                <InputField
+                  label="PIN Code *"
+                  id="pincode"
+                  value={address.pincode}
+                  error={errors.pincode}
+                  loading={pincodeLoading}
+                  hint={
+                    pincodeLoading
+                      ? 'Fetching city & state...'
+                      : address.pincode.length === 6 && address.city
+                      ? '✓ City & State auto-filled'
+                      : 'Auto-fills City & State'
+                  }
+                  onChange={handlePincodeChange}
+                  placeholder="400001"
+                />
+                <InputField
+                  label="City *"
+                  id="city"
+                  value={address.city}
+                  error={errors.city}
+                  onChange={v => setAddress(a => ({ ...a, city: v }))}
+                  placeholder="Mumbai"
+                />
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="state" className="label-caps text-cocoa-light block">State *</label>
+                    {address.state && (
+                      <span className="text-[10px] text-sage font-medium">Selected</span>
+                    )}
+                  </div>
                   <select
                     id="state"
                     value={address.state}
@@ -290,8 +394,6 @@ export function CheckoutPage() {
                   </select>
                   {errors.state && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={12} />{errors.state}</p>}
                 </div>
-                <InputField label="PIN Code *" id="pincode" value={address.pincode} error={errors.pincode}
-                  onChange={v => setAddress(a => ({ ...a, pincode: v.replace(/\D/g, '').slice(0, 6) }))} placeholder="400001" />
               </div>
             </div>
           </FadeUp>
@@ -525,23 +627,39 @@ export function CheckoutPage() {
 // Reusable input field component
 function InputField({
   label, id, value, onChange, error, placeholder = '', type = 'text', className = '',
+  loading = false, hint = '',
 }: {
   label: string; id: string; value: string; onChange: (v: string) => void;
   error?: string; placeholder?: string; type?: string; className?: string;
+  loading?: boolean; hint?: string;
 }) {
   return (
     <div className={className}>
-      <label htmlFor={id} className="label-caps text-cocoa-light block mb-1.5">{label}</label>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`w-full px-4 py-2.5 rounded-xl border bg-cream text-cocoa placeholder:text-cocoa-light/50 focus:outline-none text-sm transition-colors ${
-          error ? 'border-red-400 focus:border-red-500' : 'border-rose-line/40 focus:border-primary'
-        }`}
-      />
+      <div className="flex items-center justify-between mb-1.5">
+        <label htmlFor={id} className="label-caps text-cocoa-light block">{label}</label>
+        {hint && !error && (
+          <span className="text-[10px] text-cocoa-light/75 font-medium">{hint}</span>
+        )}
+      </div>
+      <div className="relative">
+        <input
+          id={id}
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full px-4 py-2.5 rounded-xl border bg-cream text-cocoa placeholder:text-cocoa-light/50 focus:outline-none text-sm transition-colors ${
+            loading ? 'pr-10' : ''
+          } ${
+            error ? 'border-red-400 focus:border-red-500' : 'border-rose-line/40 focus:border-primary'
+          }`}
+        />
+        {loading && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none">
+            <Loader2 size={16} className="animate-spin" />
+          </div>
+        )}
+      </div>
       {error && (
         <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
           <AlertCircle size={12} />{error}

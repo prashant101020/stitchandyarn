@@ -299,6 +299,115 @@ export async function getInitialCustomer(): Promise<CustomerUser | null> {
   return null;
 }
 
+// Update customer profile (Name, Phone, Email)
+export async function updateCustomerProfile({
+  name,
+  phone,
+  email,
+}: {
+  name: string;
+  phone?: string;
+  email?: string;
+}): Promise<{ customer: CustomerUser | null; error: string | null }> {
+  const trimmedName = name.trim();
+  const trimmedPhone = (phone || '').replace(/\D/g, '');
+  const trimmedEmail = (email || '').trim().toLowerCase();
+
+  if (!trimmedName) {
+    return { customer: null, error: 'Please enter your full name.' };
+  }
+
+  // 1. Live Supabase Connected Flow
+  if (supabase) {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        return { customer: null, error: 'You are not signed in.' };
+      }
+
+      // Update user metadata in Supabase Auth
+      const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({
+        data: {
+          ...user.user_metadata,
+          full_name: trimmedName,
+          name: trimmedName,
+          phone: trimmedPhone,
+          email: trimmedEmail,
+        },
+      });
+
+      if (authError) {
+        console.warn('Could not update Supabase auth metadata:', authError.message);
+      }
+
+      // Sync into public.customers table
+      try {
+        await supabase.from('customers').upsert({
+          id: user.id,
+          name: trimmedName,
+          email: trimmedEmail || null,
+          phone: trimmedPhone || null,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Could not sync to public.customers table:', err);
+      }
+
+      const activeUser = updatedAuth?.user || user;
+      const updatedCustomer: CustomerUser = {
+        id: activeUser.id,
+        name: trimmedName,
+        email:
+          trimmedEmail ||
+          (activeUser.email && !activeUser.email.includes('@customer.stitchandyarn.in')
+            ? activeUser.email
+            : ''),
+        phone: trimmedPhone,
+        created_at: activeUser.created_at,
+      };
+
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedCustomer));
+      } catch {
+        // Ignore
+      }
+
+      return { customer: updatedCustomer, error: null };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update profile';
+      return { customer: null, error: msg };
+    }
+  }
+
+  // 2. Fallback / Offline Demo Mode
+  let existing: CustomerUser | null = null;
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (raw) existing = JSON.parse(raw);
+  } catch {
+    // Ignore
+  }
+
+  const updated: CustomerUser = {
+    id: existing?.id || 'demo_' + Date.now(),
+    name: trimmedName,
+    email: trimmedEmail,
+    phone: trimmedPhone,
+    created_at: existing?.created_at || new Date().toISOString(),
+  };
+
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore
+  }
+
+  return { customer: updated, error: null };
+}
+
 // ═══════════════════════════════════════════════════
 // Order Management (Direct Orders & Admin Sync)
 // ═══════════════════════════════════════════════════

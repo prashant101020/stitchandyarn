@@ -20,6 +20,9 @@ import {
   MapPin,
   Calendar,
   Clock,
+  Edit3,
+  Save,
+  Phone,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store';
@@ -30,6 +33,7 @@ import {
   signInCustomer,
   isSupabaseConfigured,
   getCustomerOrders,
+  updateCustomerProfile,
 } from '@/lib/supabase';
 
 interface AuthPageProps {
@@ -65,6 +69,65 @@ export function AuthPage({ initialMode }: AuthPageProps) {
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [profileTab, setProfileTab] = useState<'orders' | 'profile'>('orders');
+
+  // Profile Edit State
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editName, setEditName] = useState(customer?.name || '');
+  const [editPhone, setEditPhone] = useState(customer?.phone || '');
+  const [editEmail, setEditEmail] = useState(customer?.email || '');
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (customer) {
+      setEditName(customer.name || '');
+      setEditPhone(customer.phone || '');
+      setEditEmail(customer.email || '');
+    }
+  }, [customer]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = editName.trim();
+    const cleanPhone = editPhone.replace(/\D/g, '');
+    const cleanEmail = editEmail.trim();
+
+    if (!trimmedName) {
+      toast.error('Please enter your full name.');
+      return;
+    }
+    if (cleanPhone && cleanPhone.length !== 10) {
+      toast.error('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (cleanEmail && !cleanEmail.includes('@')) {
+      toast.error('Please enter a valid email address.');
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const res = await updateCustomerProfile({
+        name: trimmedName,
+        phone: cleanPhone,
+        email: cleanEmail,
+      });
+
+      if (res.error) {
+        toast.error(res.error);
+      } else if (res.customer) {
+        setCustomer(res.customer);
+        setIsEditingProfile(false);
+        toast.success('Profile updated! Your new details will prefill at checkout 🌸', {
+          duration: 4000,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update profile';
+      toast.error(msg);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const fetchOrders = () => {
     if (!customer) return;
@@ -347,38 +410,138 @@ export function AuthPage({ initialMode }: AuthPageProps) {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-surface border border-rose-line/30 rounded-3xl p-6 sm:p-8 shadow-card space-y-5"
+            className="bg-surface border border-rose-line/30 rounded-3xl p-6 sm:p-8 shadow-card space-y-6"
           >
-            <h2 className="font-heading text-xl font-medium text-cocoa mb-4 flex items-center gap-2">
-              <User size={20} className="text-primary" /> Personal Information
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
-                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Full Name</span>
-                <p className="font-medium text-cocoa text-sm">{customer.name || 'Not provided'}</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="font-heading text-xl font-medium text-cocoa flex items-center gap-2">
+                  <User size={20} className="text-primary" /> Personal Information
+                </h2>
+                <p className="text-xs text-cocoa-light mt-0.5">
+                  Your saved details automatically pre-fill at checkout for effortless 1-click orders.
+                </p>
               </div>
 
-              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
-                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Email Address</span>
-                <p className="font-medium text-cocoa text-sm">{customer.email || 'None on file'}</p>
-              </div>
-
-              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
-                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Mobile Number</span>
-                <p className="font-medium text-cocoa text-sm">{customer.phone || 'None on file'}</p>
-              </div>
-
-              <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
-                <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Account ID</span>
-                <p className="font-mono text-xs text-cocoa-light/80 truncate">{customer.id}</p>
-              </div>
+              {!isEditingProfile && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditName(customer.name || '');
+                    setEditPhone(customer.phone || '');
+                    setEditEmail(customer.email || '');
+                    setIsEditingProfile(true);
+                  }}
+                  className="btn btn-secondary text-xs px-3.5 py-2 gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+                >
+                  <Edit3 size={14} /> Edit Profile
+                </button>
+              )}
             </div>
+
+            {isEditingProfile ? (
+              /* Profile Edit Form */
+              <form onSubmit={handleSaveProfile} className="space-y-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="label-caps text-cocoa-light block mb-1.5">Full Name *</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Priya Sharma"
+                      required
+                      className="w-full px-4 py-2.5 rounded-xl border border-rose-line/40 bg-cream text-cocoa text-sm focus:border-primary focus:outline-none transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label-caps text-cocoa-light block mb-1.5">Mobile Number</label>
+                    <input
+                      type="tel"
+                      value={editPhone}
+                      onChange={(e) =>
+                        setEditPhone(e.target.value.replace(/\D/g, '').slice(0, 10))
+                      }
+                      placeholder="9876543210"
+                      maxLength={10}
+                      className="w-full px-4 py-2.5 rounded-xl border border-rose-line/40 bg-cream text-cocoa text-sm focus:border-primary focus:outline-none transition-colors"
+                    />
+                    <p className="text-[10px] text-cocoa-light/70 mt-1">10-digit Indian mobile number</p>
+                  </div>
+
+                  <div>
+                    <label className="label-caps text-cocoa-light block mb-1.5">Email Address</label>
+                    <input
+                      type="email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      placeholder="priya@example.com"
+                      className="w-full px-4 py-2.5 rounded-xl border border-rose-line/40 bg-cream text-cocoa text-sm focus:border-primary focus:outline-none transition-colors"
+                    />
+                    <p className="text-[10px] text-cocoa-light/70 mt-1">For order confirmations & invoices</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="btn btn-primary text-sm px-5 py-2.5 gap-2 cursor-pointer shadow-soft hover:shadow-card disabled:opacity-50"
+                  >
+                    {savingProfile ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Save size={15} /> Save Changes
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingProfile}
+                    onClick={() => setIsEditingProfile(false)}
+                    className="btn btn-ghost text-sm px-4 py-2.5 text-cocoa-light cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Profile Details View */
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                  <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Full Name</span>
+                  <p className="font-medium text-cocoa text-sm">{customer.name || 'Not provided'}</p>
+                </div>
+
+                <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                  <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Mobile Number</span>
+                  <p className="font-medium text-cocoa text-sm">{customer.phone || 'None on file'}</p>
+                </div>
+
+                <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                  <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Email Address</span>
+                  <p className="font-medium text-cocoa text-sm">{customer.email || 'None on file'}</p>
+                </div>
+
+                <div className="p-4 bg-cream/60 rounded-2xl border border-rose-line/15">
+                  <span className="label-caps text-cocoa-light text-[0.65rem] block mb-1">Member Since</span>
+                  <p className="font-medium text-cocoa text-sm">
+                    {customer.created_at
+                      ? new Date(customer.created_at).toLocaleDateString('en-IN', {
+                          month: 'short',
+                          year: 'numeric',
+                        })
+                      : 'Crafted with Love 🌸'}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="p-4 bg-blush-light/30 border border-rose-line/20 rounded-2xl text-xs text-cocoa-light flex items-center gap-3">
               <Sparkles size={20} className="text-primary shrink-0" />
               <p>
-                Your details automatically pre-fill at checkout so you can complete handcrafted orders with a single tap.
+                Updating your details here instantly pre-fills your Delivery Name, Mobile, and Email next time you checkout!
               </p>
             </div>
           </motion.div>
