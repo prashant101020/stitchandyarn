@@ -6,11 +6,15 @@ declare global {
 
 /**
  * Retrieves the Razorpay Key ID from environment variables.
- * Checks both VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_ID.
+ * Checks RAZORPAY_KEY_ID (primary for Vercel) and VITE_RAZORPAY_KEY_ID.
  */
 export function getRazorpayKey(): string {
   const env = import.meta.env;
-  return (env.VITE_RAZORPAY_KEY_ID as string) || (env.RAZORPAY_KEY_ID as string) || '';
+  return (
+    (env.RAZORPAY_KEY_ID as string) ||
+    (env.VITE_RAZORPAY_KEY_ID as string) ||
+    ''
+  );
 }
 
 /**

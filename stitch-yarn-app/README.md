@@ -73,7 +73,7 @@ Edit `.env` with your Supabase credentials:
 ```env
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
-VITE_RAZORPAY_KEY_ID=        # Leave empty for WhatsApp-only mode
+RAZORPAY_KEY_ID=        # Leave empty for WhatsApp-only mode
 VITE_WHATSAPP_NUMBER=918779355911
 ```
 
@@ -117,7 +117,7 @@ Output is in `dist/`.
 4. Add environment variables in the Cloudflare dashboard:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
-   - `VITE_RAZORPAY_KEY_ID` (if using Razorpay)
+   - `RAZORPAY_KEY_ID` (if using Razorpay)
    - `VITE_WHATSAPP_NUMBER`
 
 ### Custom Domain

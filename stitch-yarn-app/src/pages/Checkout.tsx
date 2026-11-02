@@ -481,7 +481,7 @@ export function CheckoutPage() {
               <p className="text-xs text-cocoa-light mt-1.5 leading-relaxed">
                 To accept real UPI & card payments on your live site, add your{' '}
                 <span className="font-mono bg-cream px-1.5 py-0.5 rounded text-primary text-[11px]">
-                  VITE_RAZORPAY_KEY_ID
+                  RAZORPAY_KEY_ID
                 </span>{' '}
                 to your environment variables.
               </p>
