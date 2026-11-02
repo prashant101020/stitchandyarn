@@ -96,6 +96,8 @@ export interface Order {
   status: OrderStatus;
   payment_method: PaymentMethod;
   payment_status: 'pending' | 'paid' | 'failed';
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
   coupon_code?: string;
   gift_note?: string;
   created_at: string;

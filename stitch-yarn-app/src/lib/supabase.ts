@@ -315,7 +315,10 @@ export async function submitDirectOrder({
   total,
   couponCode = '',
   giftNote = '',
-  paymentMethod = 'cod',
+  paymentMethod = 'razorpay',
+  paymentStatus = 'paid',
+  razorpayPaymentId = '',
+  razorpayOrderId = '',
 }: {
   customerId?: string | null;
   address: Address;
@@ -326,7 +329,10 @@ export async function submitDirectOrder({
   total: number;
   couponCode?: string;
   giftNote?: string;
-  paymentMethod?: 'cod' | 'whatsapp' | 'website';
+  paymentMethod?: 'cod' | 'whatsapp' | 'website' | 'razorpay';
+  paymentStatus?: 'pending' | 'paid' | 'failed';
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
 }): Promise<{ order: Order | null; error: string | null }> {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -354,7 +360,9 @@ export async function submitDirectOrder({
         total,
         status: 'new',
         payment_method: paymentMethod,
-        payment_status: 'pending',
+        payment_status: paymentStatus,
+        razorpay_payment_id: razorpayPaymentId || null,
+        razorpay_order_id: razorpayOrderId || null,
         coupon_code: couponCode || null,
         gift_note: giftNote || '',
       };
@@ -440,7 +448,9 @@ export async function submitDirectOrder({
     total,
     status: 'new',
     payment_method: paymentMethod,
-    payment_status: 'pending',
+    payment_status: paymentStatus,
+    razorpay_payment_id: razorpayPaymentId || undefined,
+    razorpay_order_id: razorpayOrderId || undefined,
     coupon_code: couponCode,
     gift_note: giftNote,
     created_at: new Date().toISOString(),

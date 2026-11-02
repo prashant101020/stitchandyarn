@@ -608,9 +608,20 @@ export function AdminPage() {
                             <span className={`badge ${statusColors[order.status] || 'badge-sage'}`}>
                               {order.status.toUpperCase()}
                             </span>
-                            <span className="badge badge-blush text-[0.65rem]">
-                              Via {order.payment_method?.toUpperCase()}
-                            </span>
+                            {order.payment_status === 'paid' ? (
+                              <span className="badge bg-green-100 text-green-800 text-[0.65rem] font-semibold flex items-center gap-1">
+                                <Check size={11} /> PAID ({order.payment_method?.toUpperCase()})
+                              </span>
+                            ) : (
+                              <span className="badge badge-blush text-[0.65rem]">
+                                Via {order.payment_method?.toUpperCase()}
+                              </span>
+                            )}
+                            {order.razorpay_payment_id && (
+                              <span className="font-mono text-[0.65rem] bg-cream px-2 py-0.5 rounded border border-rose-line/30 text-cocoa-light">
+                                Txn: {order.razorpay_payment_id}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-cocoa-light mt-1">
                             Placed on {new Date(order.created_at).toLocaleString('en-IN', {

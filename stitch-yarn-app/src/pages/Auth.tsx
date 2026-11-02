@@ -11,6 +11,7 @@ import {
   Sparkles,
   ShieldCheck,
   CheckCircle2,
+  Check,
   Package,
   Heart,
   LogOut,
@@ -237,7 +238,13 @@ export function AuthPage({ initialMode }: AuthPageProps) {
                               })}
                             </span>
                             <span>•</span>
-                            <span>Payment: {order.payment_method?.toUpperCase()}</span>
+                            {order.payment_status === 'paid' ? (
+                              <span className="text-green-700 font-medium flex items-center gap-1">
+                                <Check size={13} /> Paid via {order.payment_method === 'razorpay' ? 'Razorpay (UPI/Card)' : order.payment_method?.toUpperCase()}
+                              </span>
+                            ) : (
+                              <span>Payment: {order.payment_method?.toUpperCase()}</span>
+                            )}
                           </div>
                         </div>
 

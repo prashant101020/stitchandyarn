@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle, Package, Sparkles } from 'lucide-react';
+import { ArrowLeft, Gift, Truck, CreditCard, Tag, AlertCircle, Package, Sparkles, ShieldCheck, Lock, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCartStore, useAuthStore } from '@/store';
 import { formatPrice, siteSettings } from '@/data';
 import { FadeUp } from '@/components/UI';
 import type { Address } from '@/types';
 import { submitDirectOrder } from '@/lib/supabase';
+import { getRazorpayKey, loadRazorpayScript, openRazorpayCheckout } from '@/lib/razorpay';
 
 // Indian states for dropdown
 const INDIAN_STATES = [
@@ -60,6 +61,7 @@ export function CheckoutPage() {
   const [showGiftNote, setShowGiftNote] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [processing, setProcessing] = useState(false);
+  const [showKeyNoticeModal, setShowKeyNoticeModal] = useState(false);
 
   const subtotal = getSubtotal();
   const shipping = getShipping();
@@ -129,12 +131,11 @@ export function CheckoutPage() {
     navigate('/order-confirmation/whatsapp');
   };
 
-  const handlePlaceOrderOnline = async () => {
-    if (!validate()) {
-      toast.error('Please fill in all required delivery fields');
-      return;
-    }
-
+  // Places order only after successful payment is confirmed
+  const executeOrderPlacement = async (
+    razorpayPaymentId?: string,
+    razorpayOrderId?: string
+  ) => {
     setProcessing(true);
 
     try {
@@ -148,17 +149,21 @@ export function CheckoutPage() {
         total,
         couponCode,
         giftNote,
-        paymentMethod: 'website',
+        paymentMethod: 'razorpay',
+        paymentStatus: 'paid',
+        razorpayPaymentId,
+        razorpayOrderId,
       });
 
       if (res.error) {
         toast.error(res.error || 'Failed to place order. Please try again.');
+        setProcessing(false);
         return;
       }
 
       if (res.order) {
         clearCart();
-        toast.success('Your order has been placed successfully! 🎉', { duration: 4500 });
+        toast.success('Payment received! Your order has been placed 🎉', { duration: 5000 });
         navigate(`/order-confirmation/${res.order.order_number}`);
       }
     } catch (err: unknown) {
@@ -166,6 +171,63 @@ export function CheckoutPage() {
       toast.error(msg);
     } finally {
       setProcessing(false);
+    }
+  };
+
+  // Launch Razorpay Payment Gateway
+  const handlePayWithRazorpay = async () => {
+    if (!validate()) {
+      toast.error('Please fill in all required delivery fields');
+      return;
+    }
+
+    const keyId = getRazorpayKey();
+
+    // If Razorpay Key is not yet configured in .env, show helpful setup modal with test payment simulation
+    if (!keyId) {
+      setShowKeyNoticeModal(true);
+      return;
+    }
+
+    setProcessing(true);
+    const loaded = await loadRazorpayScript();
+    if (!loaded) {
+      toast.error('Could not connect to Razorpay payment gateway. Please check your internet connection.');
+      setProcessing(false);
+      return;
+    }
+
+    try {
+      openRazorpayCheckout({
+        keyId,
+        amountInRupees: total,
+        customerName: address.full_name,
+        customerEmail: address.email,
+        customerPhone: address.phone,
+        itemCount: items.length,
+        deliveryCity: address.city,
+        giftNote,
+        onSuccess: async (response) => {
+          // Payment confirmed by Razorpay! Only now confirm and insert order
+          await executeOrderPlacement(
+            response.razorpay_payment_id,
+            response.razorpay_order_id
+          );
+        },
+        onDismiss: () => {
+          setProcessing(false);
+          toast('Payment was cancelled. Your items are still safe in your cart.', { icon: 'ℹ️' });
+        },
+        onError: (err) => {
+          setProcessing(false);
+          const desc = err?.description || err?.message || 'Payment failed or declined. Please try again.';
+          toast.error(desc);
+        },
+      });
+    } catch (err: unknown) {
+      setProcessing(false);
+      const msg = err instanceof Error ? err.message : 'Failed to launch Razorpay';
+      toast.error(msg);
     }
   };
 
@@ -341,10 +403,10 @@ export function CheckoutPage() {
 
             {/* Payment buttons */}
             <div className="mt-6 space-y-3">
-              {/* Option 1: Direct Order on Website (saves directly to Supabase DB) */}
+              {/* Option 1: Pay Online via Razorpay */}
               <button
                 type="button"
-                onClick={handlePlaceOrderOnline}
+                onClick={handlePayWithRazorpay}
                 disabled={processing}
                 className="btn btn-primary w-full justify-center gap-2 py-3.5 text-sm font-semibold shadow-card hover:shadow-glow disabled:opacity-50 cursor-pointer"
               >
@@ -352,11 +414,17 @@ export function CheckoutPage() {
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <>
-                    <Package size={18} />
-                    Place Order on Website ✨
+                    <CreditCard size={18} />
+                    Pay Online (UPI / Cards / Netbanking) ✨
                   </>
                 )}
               </button>
+
+              {/* Payment trust indicators */}
+              <div className="flex items-center justify-center gap-1.5 text-[11px] text-cocoa-light/75 font-medium pt-0.5">
+                <ShieldCheck size={14} className="text-sage shrink-0" />
+                <span>UPI (GPay, PhonePe, Paytm) • Cards • 100% Secured by Razorpay</span>
+              </div>
 
               <div className="relative py-1 text-center">
                 <div className="absolute inset-0 flex items-center">
@@ -380,15 +448,6 @@ export function CheckoutPage() {
                 Order via WhatsApp
               </button>
 
-              {siteSettings.razorpay_enabled && (
-                <button
-                  onClick={() => toast('Razorpay integration coming soon!', { icon: '🔧' })}
-                  className="btn btn-primary w-full justify-center gap-2"
-                >
-                  <CreditCard size={18} />
-                  Pay with UPI / Card
-                </button>
-              )}
             </div>
 
             <p className="text-xs text-cocoa-light/60 text-center mt-4">
@@ -399,6 +458,66 @@ export function CheckoutPage() {
           </div>
         </FadeUp>
       </div>
+
+      {/* Razorpay Setup Guidance & Instant Test Simulation Modal */}
+      {showKeyNoticeModal && (
+        <div className="fixed inset-0 bg-cocoa/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface rounded-3xl p-6 sm:p-8 max-w-md w-full border border-rose-line/30 shadow-elevated space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-full bg-blush-light text-primary flex items-center justify-center">
+                <CreditCard size={20} />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowKeyNoticeModal(false)}
+                className="p-1.5 rounded-lg text-cocoa-light hover:text-cocoa"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div>
+              <h3 className="font-heading text-xl font-semibold text-cocoa">Razorpay Gateway Ready</h3>
+              <p className="text-xs text-cocoa-light mt-1.5 leading-relaxed">
+                To accept real UPI & card payments on your live site, add your{' '}
+                <span className="font-mono bg-cream px-1.5 py-0.5 rounded text-primary text-[11px]">
+                  VITE_RAZORPAY_KEY_ID
+                </span>{' '}
+                to your environment variables.
+              </p>
+            </div>
+
+            <div className="bg-cream/60 rounded-2xl p-4 border border-rose-line/20 text-xs text-cocoa space-y-1.5">
+              <p className="font-semibold text-cocoa flex items-center gap-1.5">
+                <Sparkles size={14} className="text-primary" /> Test the full flow right now:
+              </p>
+              <p className="text-cocoa-light">
+                Click below to simulate a successful payment. Your order will be confirmed in Supabase, appear in the customer's profile, and show up on the Admin dashboard!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowKeyNoticeModal(false);
+                  executeOrderPlacement('pay_simulated_' + Math.random().toString(36).substring(2, 9));
+                }}
+                className="btn btn-primary w-full justify-center text-sm py-2.5"
+              >
+                Simulate Successful Payment (Test) ✨
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowKeyNoticeModal(false)}
+                className="btn btn-ghost w-full justify-center text-sm text-cocoa-light py-2"
+              >
+                Back to Checkout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
