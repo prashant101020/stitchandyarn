@@ -25,5 +25,9 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(import.meta.dirname, './src'),
       },
     },
+    server: {
+      host: true, // Exposes the server on local network (e.g. 192.168.x.x)
+      port: 5173,
+    },
   }
 })

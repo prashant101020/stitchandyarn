@@ -46,6 +46,7 @@ export function ProductPage() {
     for (const variant of product.variants) {
       if (!variantSelections[variant.name]) {
         toast.error(`Please select a ${variant.name.toLowerCase()}`);
+        document.getElementById('product-options')?.scrollIntoView({ behavior: 'smooth' });
         return;
       }
     }
@@ -53,6 +54,7 @@ export function ProductPage() {
     // Validate personalisation for keychains
     if (isPersonalisable && !personalisation.initial_letter) {
       toast.error('Please enter your initial letter');
+      document.getElementById('personalisation-section')?.scrollIntoView({ behavior: 'smooth' });
       return;
     }
 
@@ -62,7 +64,7 @@ export function ProductPage() {
   };
 
   return (
-    <main>
+    <main className="pb-28 md:pb-12">
       {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
         <nav className="flex items-center gap-2 text-sm text-cocoa-light" aria-label="Breadcrumb">
@@ -173,35 +175,39 @@ export function ProductPage() {
               </div>
 
               {/* Variants */}
-              {product.variants.map(variant => (
-                <div key={variant.id}>
-                  <label className="label-caps text-cocoa-light block mb-2">
-                    {variant.name}
-                    {variantSelections[variant.name] && (
-                      <span className="text-primary normal-case ml-2">— {variantSelections[variant.name]}</span>
-                    )}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {variant.options.map(option => (
-                      <button
-                        key={option}
-                        onClick={() => setVariantSelections(prev => ({ ...prev, [variant.name]: option }))}
-                        className={`px-4 py-2 rounded-full text-sm border transition-all ${
-                          variantSelections[variant.name] === option
-                            ? 'bg-primary text-cream border-primary'
-                            : 'bg-surface border-rose-line/30 text-cocoa hover:border-primary'
-                        }`}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
+              {product.variants.length > 0 && (
+                <div id="product-options" className="space-y-4 scroll-mt-24">
+                  {product.variants.map(variant => (
+                    <div key={variant.id}>
+                      <label className="label-caps text-cocoa-light block mb-2">
+                        {variant.name}
+                        {variantSelections[variant.name] && (
+                          <span className="text-primary normal-case ml-2">— {variantSelections[variant.name]}</span>
+                        )}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {variant.options.map(option => (
+                          <button
+                            key={option}
+                            onClick={() => setVariantSelections(prev => ({ ...prev, [variant.name]: option }))}
+                            className={`px-4 py-2 rounded-full text-sm border transition-all ${
+                              variantSelections[variant.name] === option
+                                ? 'bg-primary text-cream border-primary'
+                                : 'bg-surface border-rose-line/30 text-cocoa hover:border-primary'
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
 
               {/* Personalisation fields */}
               {isPersonalisable && (
-                <div className="bg-blush-light/30 rounded-2xl p-5 space-y-4 border border-rose-line/20">
+                <div id="personalisation-section" className="bg-blush-light/30 rounded-2xl p-5 space-y-4 border border-rose-line/20 scroll-mt-24">
                   <div className="flex items-center gap-2">
                     <Sparkles size={18} className="text-primary" />
                     <h3 className="font-heading text-lg font-medium text-cocoa">Personalise this piece</h3>
@@ -332,16 +338,16 @@ export function ProductPage() {
       </div>
 
       {/* Mobile sticky add-to-cart bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-md border-t border-rose-line/20 p-4 z-30">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-md border-t border-rose-line/20 px-4 py-3 z-30 shadow-[0_-4px_16px_rgba(62,36,32,0.08)] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center gap-3">
-          <div>
-            <p className="text-sm font-medium text-cocoa truncate">{product.name}</p>
-            <p className="text-lg font-semibold text-primary">{formatPrice(product.price)}</p>
+          <div className="min-w-0 max-w-[42%]">
+            <p className="text-xs text-cocoa-light font-medium truncate">{product.name}</p>
+            <p className="text-base font-bold text-primary">{formatPrice(product.price * quantity)}</p>
           </div>
           <button
             onClick={handleAddToCart}
             disabled={!canAddToCart}
-            className="btn btn-primary flex-1 ml-auto disabled:opacity-50"
+            className="btn btn-primary flex-1 ml-auto disabled:opacity-50 py-3 text-sm font-semibold shadow-md whitespace-nowrap flex items-center justify-center gap-2"
           >
             <ShoppingBag size={18} />
             {canAddToCart ? 'Add to bag' : 'Sold out'}
