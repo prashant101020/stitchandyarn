@@ -487,3 +487,8 @@ BEGIN
   VALUES (v_admin_id, lower(v_email), 'admin')
   ON CONFLICT (email) DO UPDATE SET id = v_admin_id;
 END $$;
+
+-- ═══ 8. Add soft-delete columns for orders ═══
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+

@@ -4,7 +4,7 @@ import {
   Package, ShoppingBag, Tag, Plus, Edit3, Trash2, Search,
   Download, LogIn, LogOut, BarChart3,
   X, Check, Image as ImageIcon, Save, MapPin, Phone, Mail,
-  RefreshCw, ExternalLink
+  RefreshCw, ExternalLink, RotateCcw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { products as mockProducts, categories, formatPrice } from '@/data';
@@ -12,6 +12,8 @@ import type { Product, OrderStatus, Order } from '@/types';
 import {
   getAllOrdersForAdmin,
   updateOrderStatusInDb,
+  softDeleteOrderInDb,
+  restoreOrderInDb,
   verifyAdminLogin,
   checkIsAdmin,
   signOutAdmin,
@@ -63,6 +65,9 @@ export function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>('orders');
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersView, setOrdersView] = useState<'active' | 'deleted'>('active');
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [adminProducts, setAdminProducts] = useState(mockProducts);
   const [searchQuery, setSearchQuery] = useState('');
@@ -220,6 +225,10 @@ export function AdminPage() {
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const activeOrders = orders.filter((o) => !o.is_deleted);
+  const deletedOrders = orders.filter((o) => o.is_deleted);
+  const displayedOrders = ordersView === 'active' ? activeOrders : deletedOrders;
+
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     // Optimistic state update
     setOrders((prev) =>
@@ -229,9 +238,36 @@ export function AdminPage() {
     await updateOrderStatusInDb(orderId, newStatus);
   };
 
+  const handleDeleteOrder = async (orderId: string) => {
+    setIsDeleting(true);
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId || o.order_number === orderId
+          ? { ...o, is_deleted: true, deleted_at: new Date().toISOString() }
+          : o
+      )
+    );
+    toast.success('Order deleted from active list');
+    setOrderToDelete(null);
+    setIsDeleting(false);
+    await softDeleteOrderInDb(orderId);
+  };
+
+  const handleRestoreOrder = async (orderId: string) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId || o.order_number === orderId
+          ? { ...o, is_deleted: false, deleted_at: undefined }
+          : o
+      )
+    );
+    toast.success('Order restored to active orders ✨');
+    await restoreOrderInDb(orderId);
+  };
+
   const exportOrdersCSV = () => {
     const headers = ['Order ID', 'Customer', 'Phone', 'Email', 'Address', 'Items', 'Total', 'Status', 'Date'];
-    const rows = orders.map(o => {
+    const rows = (ordersView === 'active' ? activeOrders : orders).map(o => {
       const itemsList = o.items || o.order_items || [];
       const addr = `${o.address_line1 || o.address?.address_line1 || ''}, ${o.city || o.address?.city || ''} ${o.pincode || o.address?.pincode || ''}`;
       return [
@@ -242,7 +278,7 @@ export function AdminPage() {
         addr,
         itemsList.map(i => `${i.product_name || i.name} x${i.quantity || i.qty || 1}`).join('; '),
         o.total,
-        o.status,
+        o.is_deleted ? 'DELETED' : o.status,
         new Date(o.created_at).toLocaleDateString('en-IN'),
       ];
     });
@@ -309,28 +345,75 @@ export function AdminPage() {
           <div className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Total Orders', value: orders.length.toString(), color: 'text-primary' },
-                { label: 'Revenue', value: formatPrice(orders.reduce((s, o) => s + o.total, 0)), color: 'text-sage' },
-                { label: 'Products', value: adminProducts.length.toString(), color: 'text-gold' },
-                { label: 'Pending', value: orders.filter(o => o.status === 'new').length.toString(), color: 'text-primary' },
+                {
+                  label: 'Total Orders',
+                  value: orders.length.toString(),
+                  color: 'text-primary',
+                  subtitle: deletedOrders.length > 0 ? `${activeOrders.length} active · ${deletedOrders.length} deleted` : undefined,
+                },
+                {
+                  label: 'Active Revenue',
+                  value: formatPrice(activeOrders.reduce((s, o) => s + o.total, 0)),
+                  color: 'text-sage',
+                },
+                {
+                  label: 'Products',
+                  value: adminProducts.length.toString(),
+                  color: 'text-gold',
+                },
+                {
+                  label: 'Pending Orders',
+                  value: activeOrders.filter(o => o.status === 'new').length.toString(),
+                  color: 'text-primary',
+                },
               ].map(stat => (
                 <div key={stat.label} className="bg-surface rounded-2xl p-5 border border-rose-line/20 shadow-soft">
                   <p className="label-caps text-cocoa-light text-xs">{stat.label}</p>
                   <p className={`font-heading text-2xl font-semibold mt-1 ${stat.color}`}>{stat.value}</p>
+                  {stat.subtitle && (
+                    <p className="text-[0.7rem] text-cocoa-light mt-1 font-medium">{stat.subtitle}</p>
+                  )}
                 </div>
               ))}
             </div>
 
             <div className="bg-surface rounded-2xl p-6 border border-rose-line/20 shadow-soft">
-              <h3 className="font-heading text-lg font-medium text-cocoa mb-4">Recent Orders</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-heading text-lg font-medium text-cocoa">Recent Orders</h3>
+                {deletedOrders.length > 0 && (
+                  <span className="text-xs text-red-700 bg-red-50 border border-red-200 px-2.5 py-0.5 rounded-full font-medium">
+                    {deletedOrders.length} deleted order{deletedOrders.length > 1 ? 's' : ''} tracked
+                  </span>
+                )}
+              </div>
               <div className="space-y-3">
-                {orders.slice(0, 5).map(order => (
-                  <div key={order.id} className="flex items-center justify-between py-2 border-b border-rose-line/10 last:border-0">
+                {orders.slice(0, 8).map(order => (
+                  <div
+                    key={order.id}
+                    className={`flex items-center justify-between py-2.5 border-b border-rose-line/10 last:border-0 ${
+                      order.is_deleted ? 'bg-red-50/40 -mx-2 px-2 rounded-lg' : ''
+                    }`}
+                  >
                     <div>
-                      <p className="text-sm font-medium text-cocoa">{order.customer_name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-medium ${order.is_deleted ? 'line-through text-cocoa-light/70' : 'text-cocoa'}`}>
+                          {order.customer_name}
+                        </p>
+                        {order.is_deleted && (
+                          <span className="text-[0.65rem] font-bold uppercase tracking-wider bg-red-100 text-red-700 px-1.5 py-0.2 rounded border border-red-200 flex items-center gap-0.5">
+                            <Trash2 size={10} /> Deleted
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-cocoa-light">{order.order_number} · {formatPrice(order.total)}</p>
                     </div>
-                    <span className={`badge ${statusColors[order.status]}`}>{order.status}</span>
+                    {order.is_deleted ? (
+                      <span className="badge bg-red-100 text-red-700 border border-red-200 font-semibold text-xs">
+                        DELETED
+                      </span>
+                    ) : (
+                      <span className={`badge ${statusColors[order.status]}`}>{order.status}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -546,11 +629,40 @@ export function AdminPage() {
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="font-heading text-xl font-medium text-cocoa">
-                  Customer Orders ({orders.length})
-                </h2>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="font-heading text-xl font-medium text-cocoa">
+                    Customer Orders
+                  </h2>
+                  <div className="flex items-center bg-cream-dark/60 p-0.5 rounded-xl border border-rose-line/20 text-xs">
+                    <button
+                      onClick={() => setOrdersView('active')}
+                      className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                        ordersView === 'active'
+                          ? 'bg-surface text-cocoa shadow-soft font-semibold'
+                          : 'text-cocoa-light hover:text-cocoa'
+                      }`}
+                    >
+                      Active ({activeOrders.length})
+                    </button>
+                    {deletedOrders.length > 0 && (
+                      <button
+                        onClick={() => setOrdersView('deleted')}
+                        className={`px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                          ordersView === 'deleted'
+                            ? 'bg-red-100 text-red-700 shadow-soft font-semibold'
+                            : 'text-cocoa-light hover:text-red-700'
+                        }`}
+                      >
+                        <Trash2 size={12} />
+                        Trash ({deletedOrders.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <p className="text-xs text-cocoa-light mt-0.5">
-                  Real-time database sync: status changes update the customer's profile instantly.
+                  {ordersView === 'active'
+                    ? "Live active orders. Deleted orders are removed from this list and tracked in Dashboard."
+                    : "Archived deleted orders. You can restore any order back to Active anytime."}
                 </p>
               </div>
 
@@ -575,15 +687,21 @@ export function AdminPage() {
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 <p className="text-sm text-cocoa-light">Loading orders from Supabase...</p>
               </div>
-            ) : orders.length === 0 ? (
+            ) : displayedOrders.length === 0 ? (
               <div className="bg-surface rounded-2xl p-12 text-center border border-rose-line/20 shadow-soft">
                 <Package size={40} className="text-cocoa-light/40 mx-auto mb-3" />
-                <h3 className="font-heading text-lg font-medium text-cocoa">No orders yet</h3>
-                <p className="text-sm text-cocoa-light mt-1">Orders placed on the website or WhatsApp will appear here.</p>
+                <h3 className="font-heading text-lg font-medium text-cocoa">
+                  {ordersView === 'active' ? 'No active orders' : 'Trash is empty'}
+                </h3>
+                <p className="text-sm text-cocoa-light mt-1">
+                  {ordersView === 'active'
+                    ? 'Orders placed on the website or WhatsApp will appear here.'
+                    : 'Deleted orders will appear here if any are removed.'}
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
-                {orders.map((order) => {
+                {displayedOrders.map((order) => {
                   const itemsList = order.items || order.order_items || [];
                   const cleanPhone = (order.customer_phone || '').replace(/\D/g, '');
                   const waNumber = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
@@ -605,9 +723,15 @@ export function AdminPage() {
                             <span className="font-mono font-bold text-base text-cocoa">
                               {order.order_number}
                             </span>
-                            <span className={`badge ${statusColors[order.status] || 'badge-sage'}`}>
-                              {order.status.toUpperCase()}
-                            </span>
+                            {order.is_deleted ? (
+                              <span className="badge bg-red-100 text-red-700 font-bold border border-red-200 text-[0.65rem] flex items-center gap-1">
+                                <Trash2 size={10} /> DELETED
+                              </span>
+                            ) : (
+                              <span className={`badge ${statusColors[order.status] || 'badge-sage'}`}>
+                                {order.status.toUpperCase()}
+                              </span>
+                            )}
                             {order.payment_status === 'paid' ? (
                               <span className="badge bg-green-100 text-green-800 text-[0.65rem] font-semibold flex items-center gap-1">
                                 <Check size={11} /> PAID ({order.payment_method?.toUpperCase()})
@@ -744,34 +868,59 @@ export function AdminPage() {
                       {/* Status Update Flow Control */}
                       <div className="pt-3 border-t border-rose-line/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-1.5 text-xs text-cocoa-light font-medium">
-                          <span>Update Status:</span>
+                          <span>{order.is_deleted ? 'Archived Actions:' : 'Update Status:'}</span>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {statusFlow.map((status) => (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {!order.is_deleted && (
+                            <>
+                              {statusFlow.map((status) => (
+                                <button
+                                  key={status}
+                                  onClick={() => updateOrderStatus(order.id, status)}
+                                  disabled={order.status === status}
+                                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
+                                    order.status === status
+                                      ? 'bg-primary text-white border-primary shadow-soft cursor-default font-semibold'
+                                      : 'border-rose-line/30 bg-surface text-cocoa hover:border-primary hover:text-primary cursor-pointer'
+                                  }`}
+                                >
+                                  {status === 'making' ? '🧶 Making' : status === 'shipped' ? '🚚 Shipped' : status}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => updateOrderStatus(order.id, 'cancelled')}
+                                disabled={order.status === 'cancelled'}
+                                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition-all ${
+                                  order.status === 'cancelled'
+                                    ? 'bg-red-600 text-white border-red-600 cursor-default'
+                                    : 'border-rose-line/30 text-cocoa-light hover:border-red-400 hover:text-red-600 cursor-pointer'
+                                }`}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          )}
+
+                          {/* Delete from active orders / Restore button */}
+                          {order.is_deleted ? (
                             <button
-                              key={status}
-                              onClick={() => updateOrderStatus(order.id, status)}
-                              disabled={order.status === status}
-                              className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
-                                order.status === status
-                                  ? 'bg-primary text-white border-primary shadow-soft cursor-default font-semibold'
-                                  : 'border-rose-line/30 bg-surface text-cocoa hover:border-primary hover:text-primary cursor-pointer'
-                              }`}
+                              onClick={() => handleRestoreOrder(order.id || order.order_number)}
+                              className="text-xs px-3 py-1.5 rounded-lg border border-sage/50 text-sage hover:bg-sage/10 font-medium transition-all flex items-center gap-1 cursor-pointer"
+                              title="Restore order to active list"
                             >
-                              {status === 'making' ? '🧶 Making' : status === 'shipped' ? '🚚 Shipped' : status}
+                              <RotateCcw size={13} />
+                              Restore to Active
                             </button>
-                          ))}
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'cancelled')}
-                            disabled={order.status === 'cancelled'}
-                            className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition-all ${
-                              order.status === 'cancelled'
-                                ? 'bg-red-600 text-white border-red-600 cursor-default'
-                                : 'border-rose-line/30 text-cocoa-light hover:border-red-400 hover:text-red-600 cursor-pointer'
-                            }`}
-                          >
-                            Cancel
-                          </button>
+                          ) : (
+                            <button
+                              onClick={() => setOrderToDelete(order)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium transition-all flex items-center gap-1 cursor-pointer ml-auto"
+                              title="Delete order from active list"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -779,6 +928,54 @@ export function AdminPage() {
                 })}
               </div>
             )}
+
+            {/* Delete Order Confirmation Modal */}
+            <AnimatePresence>
+              {orderToDelete && (
+                <>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-cocoa/40 backdrop-blur-sm z-50"
+                    onClick={() => setOrderToDelete(null)}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-surface rounded-2xl shadow-elevated z-50 p-6 border border-rose-line/30"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4 mx-auto">
+                      <Trash2 size={24} />
+                    </div>
+                    <h3 className="font-heading text-xl font-semibold text-cocoa text-center mb-2">
+                      Delete Order {orderToDelete.order_number}?
+                    </h3>
+                    <p className="text-sm text-cocoa-light text-center leading-relaxed mb-6">
+                      This order for <strong className="text-cocoa">{orderToDelete.customer_name}</strong> ({formatPrice(orderToDelete.total)}) will be hidden from the active Orders list, but will remain visible as <span className="font-semibold text-red-700">DELETED</span> in your Dashboard summary.
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setOrderToDelete(null)}
+                        disabled={isDeleting}
+                        className="btn btn-secondary flex-1 py-2.5"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleDeleteOrder(orderToDelete.id || orderToDelete.order_number)}
+                        disabled={isDeleting}
+                        className="btn bg-red-600 hover:bg-red-700 text-white flex-1 py-2.5 font-medium shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 size={15} />
+                        {isDeleting ? 'Deleting...' : 'Yes, Delete Order'}
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         )}
 

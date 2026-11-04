@@ -102,6 +102,8 @@ export interface Order {
   gift_note?: string;
   created_at: string;
   updated_at?: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
 }
 
 export interface OrderItem {

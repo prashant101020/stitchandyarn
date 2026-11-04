@@ -648,16 +648,52 @@ export async function getCustomerOrders(
   }
 
   // Deduplicate by order_number
+  const deletedIds = new Set(getDeletedOrderIds());
   const seen = new Set<string>();
   const combined: Order[] = [];
   for (const o of [...cloudOrders, ...localOrders]) {
     if (!seen.has(o.order_number)) {
       seen.add(o.order_number);
-      combined.push(o);
+      // Omit deleted orders for customer view
+      if (!o.is_deleted && !deletedIds.has(o.id) && !deletedIds.has(o.order_number)) {
+        combined.push(o);
+      }
     }
   }
 
   return { orders: combined, error: null };
+}
+
+const LOCAL_DELETED_ORDERS_KEY = 'stitch_yarn_deleted_orders_ids';
+
+export function getDeletedOrderIds(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_DELETED_ORDERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDeletedOrderId(orderId: string): void {
+  try {
+    const existing = getDeletedOrderIds();
+    if (!existing.includes(orderId)) {
+      existing.push(orderId);
+      localStorage.setItem(LOCAL_DELETED_ORDERS_KEY, JSON.stringify(existing));
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function removeDeletedOrderId(orderId: string): void {
+  try {
+    const existing = getDeletedOrderIds().filter(id => id !== orderId);
+    localStorage.setItem(LOCAL_DELETED_ORDERS_KEY, JSON.stringify(existing));
+  } catch {
+    // Ignore
+  }
 }
 
 // Fetch all orders for Admin
@@ -665,6 +701,8 @@ export async function getAllOrdersForAdmin(): Promise<{
   orders: Order[];
   error: string | null;
 }> {
+  const deletedIds = new Set(getDeletedOrderIds());
+
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -678,6 +716,7 @@ export async function getAllOrdersForAdmin(): Promise<{
         const formatted: Order[] = data.map((o) => ({
           ...o,
           items: o.order_items || [],
+          is_deleted: Boolean(o.is_deleted) || deletedIds.has(o.id) || deletedIds.has(o.order_number),
         }));
         return { orders: formatted, error: null };
       }
@@ -691,13 +730,100 @@ export async function getAllOrdersForAdmin(): Promise<{
   try {
     const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
     if (raw) {
-      return { orders: JSON.parse(raw), error: null };
+      const parsed: Order[] = JSON.parse(raw);
+      const formatted: Order[] = parsed.map((o) => ({
+        ...o,
+        is_deleted: Boolean(o.is_deleted) || deletedIds.has(o.id) || deletedIds.has(o.order_number),
+      }));
+      return { orders: formatted, error: null };
     }
   } catch {
     // Ignore
   }
 
   return { orders: [], error: null };
+}
+
+// Soft delete order for Admin (hides in Orders section, marks DELETED in Dashboard)
+export async function softDeleteOrderInDb(
+  orderId: string
+): Promise<{ success: boolean; error: string | null }> {
+  saveDeletedOrderId(orderId);
+
+  // Update local storage
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      const all: Order[] = JSON.parse(raw);
+      const updated = all.map((o) =>
+        o.id === orderId || o.order_number === orderId
+          ? { ...o, is_deleted: true, deleted_at: new Date().toISOString() }
+          : o
+      );
+      localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(updated));
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Attempt Supabase update
+  if (supabase) {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .or(`id.eq.${orderId},order_number.eq.${orderId}`);
+    } catch (err) {
+      console.warn('Could not mark order as is_deleted in Supabase (column might be pending):', err);
+    }
+  }
+
+  return { success: true, error: null };
+}
+
+// Restore soft-deleted order for Admin
+export async function restoreOrderInDb(
+  orderId: string
+): Promise<{ success: boolean; error: string | null }> {
+  removeDeletedOrderId(orderId);
+
+  // Update local storage
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      const all: Order[] = JSON.parse(raw);
+      const updated = all.map((o) =>
+        o.id === orderId || o.order_number === orderId
+          ? { ...o, is_deleted: false, deleted_at: undefined }
+          : o
+      );
+      localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(updated));
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Attempt Supabase update
+  if (supabase) {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          is_deleted: false,
+          deleted_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .or(`id.eq.${orderId},order_number.eq.${orderId}`);
+    } catch (err) {
+      console.warn('Could not restore order in Supabase:', err);
+    }
+  }
+
+  return { success: true, error: null };
 }
 
 // Update order status in Supabase (visible to customer immediately)
